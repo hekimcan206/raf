@@ -3,7 +3,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Hangfire;
 using Hangfire.PostgreSql;
-using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Options;
 using Polly;
 using Raf.Api.Baskets;
@@ -52,13 +51,12 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
     return ConnectionMultiplexer.Connect(options);
 });
 
-// Feed HTTP client: per-attempt timeout shorter than a hung feed, one jittered retry, and a total budget per page.
+// Feed HTTP client: a timeout shorter than a hung feed and no in-run retries. The next scheduled run is the retry
+// (docs/hangfire-job-plan.md): retrying inside a run only stretches it while the feed is in a maintenance window.
 builder.Services.AddHttpClient(FeedIngestionService.HttpClientName)
     .AddResilienceHandler("feeds", (pipeline, context) =>
     {
         var feeds = context.ServiceProvider.GetRequiredService<IOptions<FeedOptions>>().Value;
-        pipeline.AddTimeout(TimeSpan.FromSeconds((feeds.AttemptTimeout.TotalSeconds * 2) + 2));
-        pipeline.AddRetry(new HttpRetryStrategyOptions { MaxRetryAttempts = 1, Delay = TimeSpan.FromMilliseconds(300), UseJitter = true });
         pipeline.AddTimeout(feeds.AttemptTimeout);
     });
 

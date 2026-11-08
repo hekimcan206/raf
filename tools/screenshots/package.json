@@ -1,0 +1,14 @@
+{
+  "name": "raf-screenshots",
+  "private": true,
+  "type": "module",
+  "description": "Captures README screenshots and the demo GIF of the Expo web build with Playwright.",
+  "scripts": {
+    "capture": "node capture.mjs"
+  },
+  "dependencies": {
+    "gifenc": "1.0.3",
+    "playwright": "1.64.1",
+    "pngjs": "7.0.0"
+  }
+}

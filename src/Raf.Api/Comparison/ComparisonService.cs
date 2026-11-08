@@ -71,9 +71,12 @@ internal sealed class ComparisonService
         string cacheResult;
         BasketComparison? comparison = null;
 
+        string? epoch = null;
         if (_settings.CacheEnabled)
         {
-            comparison = await _cache.GetAsync(key);
+            // Epoch read together with the entry, i.e. before prices are loaded: if a price changes in between,
+            // the epoch moves and the write below is refused.
+            (comparison, epoch) = await _cache.LookupAsync(key);
             // ValidUntil guards against serving a result whose prices have expired since it was cached.
             if (comparison is not null && comparison.ValidUntil <= _clock.GetUtcNow())
             {
@@ -87,8 +90,6 @@ internal sealed class ComparisonService
         }
         else
         {
-            // Epoch first, then prices: if a price changes in between, the epoch moves and the write is refused.
-            var epoch = _settings.CacheEnabled ? await _cache.CurrentEpochAsync() : null;
             var snapshot = await _catalog.LoadSnapshotAsync([.. lines.Select(l => l.ProductId).Distinct()], ct);
             var now = _clock.GetUtcNow();
             comparison = BasketComparer.Compare(snapshot, lines, now, _policy, new ComparisonOptions(_settings.MaxOverbuyRatio));
@@ -101,7 +102,7 @@ internal sealed class ComparisonService
         }
 
         _metrics.CacheLookup(cacheResult);
-        var health = (await _health.GetAllAsync(ct)).ToDictionary(h => h.Code, StringComparer.Ordinal);
+        var health = (await _health.GetSnapshotAsync(ct)).ToDictionary(h => h.Code, StringComparer.Ordinal);
         var dto = ToDto(comparison, health, _policy, _clock.GetUtcNow(), cacheResult);
         _metrics.ComparisonDuration(Stopwatch.GetElapsedTime(started).TotalMilliseconds, cacheResult);
         return dto;

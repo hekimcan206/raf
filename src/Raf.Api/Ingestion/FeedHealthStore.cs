@@ -21,6 +21,31 @@ public sealed record FeedRunDto(
 
 public sealed class FeedHealthStore(NpgsqlDataSource dataSource, IOptions<FeedOptions> options, TimeProvider clock)
 {
+    /// <summary>
+    /// Feed health changes at most once per ingestion run (every minute or more), but every comparison shows it. A
+    /// short in-process snapshot keeps a Redis cache hit free of database round trips. Status changes made by this
+    /// process drop the snapshot immediately, and another instance's changes show up within <see cref="SnapshotTtl"/>.
+    /// </summary>
+    public static readonly TimeSpan SnapshotTtl = TimeSpan.FromSeconds(5);
+
+    private (IReadOnlyList<MarketHealthDto> Value, DateTimeOffset At)? _snapshot;
+
+    public async Task<IReadOnlyList<MarketHealthDto>> GetSnapshotAsync(CancellationToken ct)
+    {
+        var snapshot = _snapshot;
+        var now = clock.GetUtcNow();
+        if (snapshot is { } s && now - s.At < SnapshotTtl)
+        {
+            return s.Value;
+        }
+
+        var fresh = await GetAllAsync(ct);
+        _snapshot = (fresh, now);
+        return fresh;
+    }
+
+    public void InvalidateSnapshot() => _snapshot = null;
+
     public async Task<IReadOnlyList<MarketHealthDto>> GetAllAsync(CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
 using Raf.Api.Comparison;
+using Raf.Api.Ingestion;
 
 namespace Raf.Api.Realtime;
 
@@ -58,7 +59,7 @@ public sealed class PriceHub : Hub<IPriceClient>
 /// In that order, a client that refetches on the push can never be served the pre-change cached result.
 /// </summary>
 public sealed partial class PriceChangeNotifier(
-    ComparisonCache cache, IHubContext<PriceHub, IPriceClient> hub, ILogger<PriceChangeNotifier> logger)
+    ComparisonCache cache, FeedHealthStore health, IHubContext<PriceHub, IPriceClient> hub, ILogger<PriceChangeNotifier> logger)
 {
     public async Task PricesChangedAsync(IReadOnlyList<PriceChangedEvent> changes, CancellationToken ct)
     {
@@ -76,7 +77,11 @@ public sealed partial class PriceChangeNotifier(
         }
     }
 
-    public Task FeedHealthChangedAsync(FeedHealthChangedEvent change) => hub.Clients.All.FeedHealthChanged(change);
+    public Task FeedHealthChangedAsync(FeedHealthChangedEvent change)
+    {
+        health.InvalidateSnapshot();
+        return hub.Clients.All.FeedHealthChanged(change);
+    }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "{Changes} price changes; {Dropped} cached comparisons invalidated")]
     private partial void LogInvalidated(int changes, long dropped);

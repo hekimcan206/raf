@@ -59,6 +59,33 @@ public sealed partial class ComparisonCache(IConnectionMultiplexer redis, ILogge
         return EntryPrefix + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..32];
     }
 
+    /// <summary>
+    /// Entry and price epoch in one round trip (MGET). On a miss the caller already holds the epoch it must pass to
+    /// <see cref="TrySetAsync"/>, read before it loads prices, which saves a second Redis round trip per miss.
+    /// </summary>
+    /// <returns>Epoch null when Redis is unavailable: then nothing is read from or written to the cache.</returns>
+    public async Task<(BasketComparison? Value, string? Epoch)> LookupAsync(string key)
+    {
+        try
+        {
+            var values = await redis.GetDatabase().StringGetAsync([key, EpochKey]);
+            var epoch = values[1].IsNullOrEmpty ? "0" : (string)values[1]!;
+            var value = values[0].IsNullOrEmpty ? null : JsonSerializer.Deserialize<BasketComparison>((string)values[0]!, JsonSerializerOptions.Web);
+            return (value, epoch);
+        }
+        catch (Exception ex) when (ex is RedisException or TimeoutException)
+        {
+            LogCacheError(ex, "lookup");
+            return (null, null);
+        }
+        catch (JsonException ex)
+        {
+            // An unreadable entry (e.g. written by an older version) is a miss, not an outage.
+            LogCacheError(ex, "deserialize");
+            return (null, await CurrentEpochAsync());
+        }
+    }
+
     public async Task<BasketComparison?> GetAsync(string key)
     {
         try

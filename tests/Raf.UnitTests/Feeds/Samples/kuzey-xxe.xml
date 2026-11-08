@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE fiyatListesi [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>
+<fiyatListesi uretim="2026-11-07T00:00:00Z">
+  <urun gtin="02000000000015" ad="&xxe;" miktar="1 L" kurus="4195" />
+</fiyatListesi>

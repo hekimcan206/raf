@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fiyatListesi uretim="2026-11-07T00:00:00Z">
+  <urun gtin="02000000000015" ad="Ovacık Tam Yağlı Süt 1 L" miktar="1 L" kurus="4195" />
+  <urun gtin="2000000000022" ad="Dağ Süt Tam Yağlı Süt 1 L" miktar="1 L" kurus="4465" />
+  <urun gtin="02000000000099" ad="bad gtin" miktar="1 L" kurus="100" />
+  <urun gtin="02000000000039" ad="bad price" miktar="500 ml" kurus="22.50" />
+</fiyatListesi>

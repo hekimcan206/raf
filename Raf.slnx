@@ -5,4 +5,7 @@
     <Project Path="src/Raf.FeedSimulator/Raf.FeedSimulator.csproj" />
     <Project Path="src/Raf.Simulation/Raf.Simulation.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Raf.UnitTests/Raf.UnitTests.csproj" />
+  </Folder>
 </Solution>

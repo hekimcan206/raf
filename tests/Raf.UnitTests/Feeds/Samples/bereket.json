@@ -1,0 +1,10 @@
+{
+  "generated_at": "2026-11-07T14:02:11+03:00",
+  "items": [
+    { "barcode": "2000000000015", "name": "Ovacık Tam Yağlı Süt 1 L", "size": "1 L", "price_try": 39.95, "updated": "2026-11-07T14:00:00+03:00" },
+    { "barcode": "02000000000039", "name": "Ovacık Tam Yağlı Süt 500 ml", "size": "500 ml", "price_try": 22.5, "updated": "2026-11-07T14:00:00+03:00" },
+    { "barcode": "2000000000016", "name": "check digit wrong", "price_try": 10, "updated": "2026-11-07T14:00:00+03:00" },
+    { "barcode": "2000000000046", "name": "price missing", "updated": "2026-11-07T14:00:00+03:00" },
+    { "barcode": "2000000000053", "name": "Dağ Süt Yoğurt 1 kg", "price_try": 84.999, "updated": "2026-11-07T11:00:00Z" }
+  ]
+}

@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Raf.Benchmarks/Raf.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Raf.Api/Raf.Api.csproj" />
     <Project Path="src/Raf.Core/Raf.Core.csproj" />

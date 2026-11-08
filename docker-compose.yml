@@ -1,0 +1,114 @@
+# `docker compose up` runs the whole demo with zero manual steps:
+#   postgres   → initialised with least-privilege roles (deploy/postgres/init)
+#   redis      → comparison cache
+#   simulator  → four fictional markets publishing prices in their own formats, with latency, failures and outages
+#   migrator   → API image, `--migrate-only --seed-demo` as the schema owner: migrations, Hangfire schema,
+#                synthetic catalogue, two weeks of price history and a sample basket; exits (idempotent)
+#   api        → API + Hangfire server (recurring ingestion jobs) + SignalR hub, as the application role
+#   web        → Expo web build behind nginx, proxying /api and /hubs to the API
+# Open http://localhost:58281 for the app, http://localhost:58280/scalar for the API, /hangfire for the jobs.
+name: raf
+
+x-image: &dotnet-build
+  context: .
+  dockerfile: Dockerfile
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: raf
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres-dev-only}
+      MIGRATOR_PASSWORD: ${MIGRATOR_PASSWORD:-migrator-dev-only}
+      APP_PASSWORD: ${APP_PASSWORD:-app-dev-only}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-58632}:5432"
+    volumes:
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d raf"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-58679}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  simulator:
+    image: raf-simulator:local
+    build:
+      <<: *dotnet-build
+      target: simulator
+    environment:
+      Simulator__Chaos: ${SIMULATOR_CHAOS:-true}
+    ports:
+      - "127.0.0.1:${SIMULATOR_PORT:-58282}:8080"
+    restart: unless-stopped
+
+  migrator:
+    image: raf-api:local
+    build:
+      <<: *dotnet-build
+      target: api
+    command: ["--migrate-only", "--seed-demo"]
+    environment:
+      ConnectionStrings__Default: Host=postgres;Database=raf;Username=raf_migrator;Password=${MIGRATOR_PASSWORD:-migrator-dev-only}
+      Jobs__ServerEnabled: "false"
+      Jobs__RegisterRecurringJobs: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: raf-api:local
+    build:
+      <<: *dotnet-build
+      target: api
+    ports:
+      - "127.0.0.1:${API_PORT:-58280}:8080"
+    environment:
+      ConnectionStrings__Default: Host=postgres;Database=raf;Username=raf_app;Password=${APP_PASSWORD:-app-dev-only};Timeout=5
+      ConnectionStrings__Redis: redis:6379
+      Feeds__Markets__bereket__Url: http://simulator:8080/feeds/bereket/prices.json
+      Feeds__Markets__carsi__Url: http://simulator:8080/feeds/carsi/fiyatlar.csv
+      Feeds__Markets__kuzey__Url: http://simulator:8080/feeds/kuzey/fiyat-listesi.xml
+      Feeds__Markets__tazelik__Url: http://simulator:8080/feeds/tazelik/products
+      Comparison__CacheEnabled: ${CACHE_ENABLED:-true}
+      Jobs__DashboardEnabled: "true"
+      OpenApi__Enabled: "true"
+      OTEL_SERVICE_NAME: raf-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      simulator:
+        condition: service_started
+    # No container HEALTHCHECK: the chiseled image has no shell or curl. Probe /health/live and /health/ready over HTTP.
+    restart: unless-stopped
+
+  web:
+    image: raf-web:local
+    build:
+      context: ./mobile
+      dockerfile: Dockerfile
+    ports:
+      - "${WEB_PORT:-58281}:8080"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:

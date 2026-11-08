@@ -1,0 +1,235 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  build-test:
+    name: .NET build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore
+
+      # Package versions are pinned and updated by hand, so a known vulnerability in any direct or
+      # transitive package fails the build. Fix it with a pinned upgrade in Directory.Packages.props.
+      - name: Audit for vulnerable packages
+        run: |
+          set -o pipefail
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerable-packages.txt
+          if grep -q "has the following vulnerable packages" vulnerable-packages.txt; then
+            echo "::error::Known-vulnerable NuGet packages found (see the list above)"
+            exit 1
+          fi
+
+      - name: Format check
+        run: dotnet format --verify-no-changes --no-restore
+
+      - name: Build (warnings are errors)
+        run: dotnet build --no-restore --configuration Release
+
+      # Integration tests start PostgreSQL and Redis through Testcontainers on the runner's Docker engine.
+      - name: Test
+        run: >
+          dotnet test --no-build --configuration Release
+          --coverage --coverage-output-format cobertura
+          --results-directory "${{ github.workspace }}/TestResults"
+
+      - name: Coverage summary
+        if: always()
+        uses: danielpalme/ReportGenerator-GitHub-Action@5.5.12
+        with:
+          reports: TestResults/**/*.cobertura.xml
+          targetdir: coverage
+          reporttypes: MarkdownSummaryGithub
+          assemblyfilters: "-*Tests*;-Raf.Benchmarks"
+          filefilters: "-*/obj/*"
+
+      - name: Publish coverage to job summary
+        if: always()
+        run: |
+          if [ -f coverage/SummaryGithub.md ]; then
+            cat coverage/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No coverage report produced."
+          fi
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: test-results
+          path: TestResults/
+          retention-days: 7
+
+  mobile:
+    name: app typecheck, test & web build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      # Fails on high or critical advisories in the packages the app ships (dev tooling excluded).
+      - name: Audit for vulnerable packages
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Jest
+        run: npx jest --ci
+
+      - name: Expo web export
+        run: npx expo export --platform web --output-dir dist
+
+  container:
+    name: container images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build API image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: api
+          push: false
+          load: true
+          tags: raf-api:ci
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Build simulator image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: simulator
+          push: false
+          load: true
+          tags: raf-simulator:ci
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=simulator
+
+      - name: Verify the .NET images run as non-root
+        run: |
+          for image in raf-api:ci raf-simulator:ci; do
+            user=$(docker image inspect "$image" --format '{{.Config.User}}')
+            echo "${image}: user=${user}"
+            test -n "${user}" && test "${user}" != "0" && test "${user}" != "root"
+          done
+
+  compose-demo:
+    name: docker compose demo
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Deterministic feeds: no random failures or maintenance windows while the demo is asserted.
+      SIMULATOR_CHAOS: "false"
+    steps:
+      - uses: actions/checkout@v7
+
+      # The README promises `docker compose up` runs the whole demo with zero manual steps; this job keeps it true.
+      - name: Start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for migrations + seed, the API and the web app
+        run: |
+          test "$(docker wait raf-migrator-1)" = "0" || { docker compose logs migrator; exit 1; }
+          for i in $(seq 1 60); do curl -fsS http://localhost:58280/health/ready && break; sleep 2; done
+          curl -fsS http://localhost:58280/health/ready
+          for i in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:58281/ && break; sleep 2; done
+          curl -fsS http://localhost:58281/ | grep -q '<div id="root">'
+
+      - name: Compare the seeded sample basket through the web app's proxy (miss, then Redis hit)
+        run: |
+          basket=5eed0000-0000-4000-8000-00000000ba5e
+          curl -fsS -D first.h -o first.json "http://localhost:58281/api/v1/baskets/${basket}/comparison"
+          curl -fsS -D second.h -o second.json "http://localhost:58281/api/v1/baskets/${basket}/comparison"
+          grep -i '^x-cache: miss' first.h
+          grep -i '^x-cache: hit' second.h
+          jq -e '.markets | length == 4' first.json
+          jq -e '[.markets[] | select(.code == "carsi")][0].complete == false' first.json
+          jq -e '[.markets[] | select(.code == "tazelik")][0].freshness.staleShare > 0' first.json
+          jq -r '.markets[] | "\(.rank) \(.code) \(.totalKurus) complete=\(.complete) stale=\(.freshness.staleShare)"' first.json
+
+      - name: Hangfire ingests every market feed
+        run: |
+          # Kuzey runs every 5 minutes; trigger nothing by hand: wait for the schedule (at most ~5 min).
+          for i in $(seq 1 75); do
+            ok=$(curl -fsS "http://localhost:58280/api/v1/feeds/runs?limit=200" | jq '[.[] | select(.status == "succeeded") | .marketCode] | unique | length')
+            echo "markets with a successful run: ${ok}"
+            [ "${ok}" = "4" ] && break
+            sleep 5
+          done
+          [ "${ok}" = "4" ]
+          curl -fsS http://localhost:58280/api/v1/markets | jq -e 'all(.status == "healthy")'
+
+      - name: A forced price change reaches the comparison (cache invalidated)
+        run: |
+          curl -fsS -X POST localhost:58282/admin/markets/bereket/prices -H 'content-type: application/json' \
+               -d '{"gtin":"2000000000015","priceKurus":3333}'
+          id=$(curl -fsS "http://localhost:58280/api/v1/products?q=2000000000015" | jq -r '.[0].id')
+          body="{\"items\":[{\"productId\":\"${id}\",\"quantity\":1}]}"
+          curl -fsS -o /dev/null localhost:58280/api/v1/comparisons -H 'content-type: application/json' -d "$body"
+          for i in $(seq 1 30); do
+            price=$(curl -fsS localhost:58280/api/v1/comparisons -H 'content-type: application/json' -d "$body" \
+                    | jq '[.markets[] | select(.code == "bereket")][0].totalKurus')
+            echo "bereket total: ${price}"
+            [ "${price}" = "3333" ] && break
+            sleep 5
+          done
+          [ "${price}" = "3333" ]
+
+      - name: Re-running migrations and the seed changes nothing (idempotent)
+        run: |
+          before=$(docker compose exec -T postgres psql -U postgres -d raf -tAc "SELECT count(*) FROM raf.price_observation WHERE source = 'seed' AND observed_at < date_trunc('day', now())")
+          docker compose run --rm migrator
+          after=$(docker compose exec -T postgres psql -U postgres -d raf -tAc "SELECT count(*) FROM raf.price_observation WHERE source = 'seed' AND observed_at < date_trunc('day', now())")
+          echo "seed history rows: ${before} -> ${after}"
+          test "${before}" = "${after}"
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail 200

@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Raf.Core/Raf.Core.csproj" />
+    <Project Path="src/Raf.Simulation/Raf.Simulation.csproj" />
+    <Project Path="src/Raf.FeedSimulator/Raf.FeedSimulator.csproj" />
   </Folder>
 </Solution>

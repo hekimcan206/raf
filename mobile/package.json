@@ -1,0 +1,41 @@
+{
+  "name": "raf-mobile",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@expo/metro-runtime": "58.0.17",
+    "@microsoft/signalr": "10.0.11",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/netinfo": "12.0.1",
+    "@tanstack/query-async-storage-persister": "5.107.1",
+    "@tanstack/react-query": "5.107.1",
+    "@tanstack/react-query-persist-client": "5.107.1",
+    "expo": "58.0.23",
+    "expo-status-bar": "58.0.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-web": "0.21.4"
+  },
+  "devDependencies": {
+    "@types/jest": "30.0.0",
+    "@types/react": "19.3.0",
+    "jest": "30.5.2",
+    "jest-expo": "58.0.14",
+    "typescript": "6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web",
+    "build:web": "expo export --platform web",
+    "test": "jest",
+    "typecheck": "tsc --noEmit"
+  },
+  "private": true,
+  "jest": {
+    "preset": "jest-expo",
+    "testMatch": [
+      "**/__tests__/**/*.test.ts?(x)"
+    ]
+  }
+}

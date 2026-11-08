@@ -1,0 +1,39 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+artifacts/
+publish/
+
+# Tests and coverage
+TestResults/
+coverage/
+*.coverage
+*.cobertura.xml
+
+# IDEs
+.vs/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.user
+*.suo
+*.DotSettings.user
+
+# Secrets and local environment
+.env
+appsettings.*.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+benchmark-results/
+
+# Mobile app (Expo)
+node_modules/
+mobile/dist/
+mobile/.expo/
+mobile/web-build/
+*.tsbuildinfo
+npm-debug.log*
+playwright-report/
+test-results/

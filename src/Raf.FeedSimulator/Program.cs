@@ -61,7 +61,8 @@ public static class Program
                 {
                     "bereket" => FeedWriters.Bereket(prices, now),
                     "carsi" => FeedWriters.Carsi(prices),
-                    "kuzey" => FeedWriters.Kuzey(prices, PriceModel.PublicationTime(market, now)),
+                    // A manual change makes Kuzey re-issue its list: the list timestamp is the newest price in it.
+                    "kuzey" => FeedWriters.Kuzey(prices, prices.Max(p => p.ObservedAt)),
                     _ => FeedWriters.TazelikPage(prices, Math.Max(1, page ?? 1)),
                 };
                 return Results.Text(body, market.ContentType);
